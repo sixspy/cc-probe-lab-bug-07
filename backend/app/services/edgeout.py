@@ -1,4 +1,8 @@
-"""边表同票收口面：页灯可绿，切流/双写命运未贯彻，读轨仍旧。"""
+"""边表同票收口面：切流账册形态下由 app.services.同票 供真相。
+
+面板绿灯只认真实主边同票（读轨 cutover_book + 耐久指纹 + 拒半态回刷 + 零半态），
+半态在场一律红灯并拒回刷，不再允许 display-only 假亮。
+"""
 from __future__ import annotations
 
 from app.db import 连接
@@ -96,87 +100,65 @@ def archive_rows() -> list[dict]:
 
 
 def paint_ok() -> str:
-    conn = 连接()
-    try:
-        _set(conn, f"{_SLUG}_panel_chip", _OK)
-        _set(conn, f"{_SLUG}_display_only", "1")
-        conn.commit()
-        return _OK
-    finally:
-        conn.close()
+    """不再允许 display-only 假亮：只反映同票真相。"""
+    from app.services import 同票
+    态 = 同票.同票状态()
+    return 态["芯片"]
 
 
 def commit_action(payload: dict | None = None) -> dict:
-    """Broken：亮灯，读轨仍 old_track，无耐久命运。"""
-    payload = payload or {}
-    conn = 连接()
-    try:
-        c = int(_get(conn, f"{_SLUG}_counter", "0") or "0") + 1
-        _set(conn, f"{_SLUG}_counter", str(c))
-        _set(conn, f"{_SLUG}_panel_chip", _OK)
-        _set(conn, f"{_SLUG}_last_payload", str(payload)[:200])
-        _set(conn, f"{_SLUG}_gate_bypass", "1")
-        _set(conn, f"{_SLUG}_active_read", _OLD)
-        _set(conn, f"{_SLUG}_reject_refresh", "0")
-        if not _get(conn, f"{_SLUG}_cutover_fp", ""):
-            _set(conn, f"{_SLUG}_cutover_fp", "stale-fp")
-        _set(conn, f"{_SLUG}_pack_decoy", f"stale-fp|{c}")
-        _set(conn, f"{_SLUG}_truth", _BAD)
-        _set(conn, f"{_SLUG}_mode", "")
-        _set(conn, f"{_SLUG}_live_flag", "")
-        conn.commit()
-        return {
-            "ok": True,
-            "chip": _OK,
-            "title": _TITLE,
-            "counter": c,
-            "active_read": _OLD,
-            "cutover_fp": "stale-fp",
-            "reject_refresh": False,
-            "archive_count": 0,
-            "live_flag": "",
-            "message": f"{_TITLE}已落台",
-        }
-    finally:
-        conn.close()
+    """切流账册落定：主边同事务读轨 + 耐久指纹 + 拒半态回刷。"""
+    from app.services import 同票
+    落 = 同票.落定切流()
+    态 = 同票.同票状态()
+    return {
+        "ok": 态["可亮绿"],
+        "chip": 态["芯片"],
+        "title": _TITLE,
+        "active_read": 落["active_read"],
+        "cutover_fp": 落["指纹"],
+        "reject_refresh": 落["reject_refresh"],
+        "archive_count": len(archive_rows()),
+        "live_flag": live_flag(),
+        "半态笔数": 落["半态笔数"],
+        "message": f"{_TITLE}切流账册已落定" if 态["可亮绿"] else f"{_TITLE}存在半态，红灯拒回刷",
+    }
 
 
 def half_fix_display() -> dict:
-    paint_ok()
+    """半修（只补插边表而不同票）在真相面下无法冒充绿灯。"""
+    from app.services import 同票
+    态 = 同票.同票状态()
     return {
-        "panel_chip": panel_chip(),
-        "truth": truth_flag(),
-        "active_read": active_read_ref(),
+        "panel_chip": 态["芯片"],
+        "truth": 态["芯片"],
+        "active_read": 态["读轨"],
         "archive_count": len(archive_rows()),
-        "half_fixed": True,
+        "half_fixed": False,
+        "半态笔数": 态["半态笔数"],
     }
 
 
 def snapshot() -> dict:
-    ref = active_read_ref()
-    chip = panel_chip()
-    truth = truth_flag()
-    arch = archive_rows()
-    aligned = (
-        chip == truth == _OK
-        and ref in (_CUTOVER, _LIVE)
-        and (
-            (ref == _CUTOVER and reject_refresh() and cutover_fp() not in ("", "stale-fp"))
-            or (ref == _LIVE and bool(live_flag()) and len(arch) > 0)
-        )
-    )
+    from app.services import 同票
+    态 = 同票.同票状态()
+    半 = 态["半态笔数"]
+    aligned = 态["可亮绿"]
     return {
         "title": _TITLE,
-        "panel_chip": chip,
-        "truth": truth,
-        "active_read": ref,
-        "cutover_fp": cutover_fp(),
-        "reject_refresh": reject_refresh(),
-        "archive_count": len(arch),
+        "panel_chip": 态["芯片"],
+        "truth": 态["芯片"],
+        "active_read": 态["读轨"],
+        "cutover_fp": 态["指纹"],
+        "reject_refresh": 态["拒半态回刷"],
+        "archive_count": len(archive_rows()),
         "live_flag": live_flag(),
         "aligned": aligned,
-        "panel_pack_mismatch": chip == _OK and not aligned,
-        "gate_bypass": True,
+        "panel_pack_mismatch": not aligned,
+        "gate_bypass": False,
+        "形态": 态["形态"],
+        "半态笔数": 半,
+        "半态明细": 态["半态明细"],
     }
 
 

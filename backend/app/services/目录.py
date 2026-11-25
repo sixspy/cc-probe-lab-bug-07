@@ -40,12 +40,16 @@ def 站点列表() -> list[dict]:
 def 报文列表(限制: int = 200) -> list[dict]:
     conn = 连接()
     try:
-        return [
+        rows = [
             dict(r)
             for r in conn.execute(
                 "SELECT * FROM 观测报文 ORDER BY 观测时 DESC LIMIT ?", (限制,)
             ).fetchall()
         ]
+        半态号 = {x["报文编号"] for x in _同票半态号(conn)}
+        for r in rows:
+            r["同票"] = "半态" if r["报文编号"] in 半态号 else "主边同票"
+        return rows
     finally:
         conn.close()
 
@@ -54,15 +58,29 @@ def 缓冲列表(命运: str | None = None) -> list[dict]:
     conn = 连接()
     try:
         if 命运:
-            return [
+            rows = [
                 dict(r)
                 for r in conn.execute(
                     "SELECT * FROM 入栏缓冲 WHERE 命运=? ORDER BY 观测时", (命运,)
                 ).fetchall()
             ]
-        return [dict(r) for r in conn.execute("SELECT * FROM 入栏缓冲 ORDER BY 观测时").fetchall()]
+        else:
+            rows = [dict(r) for r in conn.execute("SELECT * FROM 入栏缓冲 ORDER BY 观测时").fetchall()]
+        主号 = {
+            r["报文编号"]
+            for r in conn.execute("SELECT 报文编号 FROM 观测报文").fetchall()
+        }
+        for r in rows:
+            # 边表行须有同票主表背书，否则即边有主无半态
+            r["同票"] = "主边同票" if r["报文编号"] in 主号 else "半态"
+        return rows
     finally:
         conn.close()
+
+
+def _同票半态号(conn) -> list[dict]:
+    from app.services import 同票
+    return 同票._半态查询(conn)
 
 
 def 汇总列表(限制: int = 200) -> list[dict]:
@@ -118,9 +136,10 @@ def 概览_broken_placeholder():
 
 
 def 概览() -> dict:
+    from app.services import 同票
     conn = 连接()
     try:
-        return {
+        数据 = {
             "观测报文": conn.execute("SELECT COUNT(*) AS c FROM 观测报文").fetchone()["c"],
             "在栏": conn.execute("SELECT COUNT(*) AS c FROM 入栏缓冲 WHERE 命运='在栏'").fetchone()["c"],
             "站点汇总": conn.execute("SELECT COUNT(*) AS c FROM 站点汇总账").fetchone()["c"],
@@ -129,6 +148,8 @@ def 概览() -> dict:
         }
     finally:
         conn.close()
+    数据["同票"] = 同票.同票状态()
+    return 数据
 
 
 def 装载批次列表(限制: int = 50) -> list[dict]:
@@ -170,14 +191,15 @@ def 站点查(源键: str) -> dict | None:
 
 
 def edgeout_齐套灯() -> dict:
-    """展示齐套：只读面板芯片，不核真实对齐。"""
-    from app.services import edgeout as _m
-    snap = _m.dashboard()
+    """同票齐套灯：以主边同票真相为准，半态在场不得亮绿。"""
+    from app.services import 同票
+    态 = 同票.同票状态()
     return {
-        "标题": snap.get("title"),
-        "芯片": snap.get("panel_chip"),
-        "真相": snap.get("truth"),
-        "齐套": snap.get("panel_chip") == snap.get("ok_chip"),
-        "对齐实值": snap.get("aligned"),
-        "panel_pack_mismatch": snap.get("panel_pack_mismatch", True),
+        "标题": 态.get("标题"),
+        "芯片": 态.get("芯片"),
+        "真相": 态.get("芯片"),
+        "齐套": 态.get("可亮绿"),
+        "对齐实值": 态.get("可亮绿"),
+        "panel_pack_mismatch": not 态.get("可亮绿"),
+        "半态笔数": 态.get("半态笔数"),
     }

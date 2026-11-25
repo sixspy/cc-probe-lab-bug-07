@@ -32,8 +32,8 @@ function 安全文本(s) {
   })[c]);
 }
 function 命运色(f) {
-  if (["已入栏", "在栏", "已汇总", "对齐"].includes(f)) return "ok";
-  if (["已坏点", "撕裂"].includes(f)) return "warn";
+  if (["已入栏", "在栏", "已汇总", "对齐", "主边同票"].includes(f)) return "ok";
+  if (["已坏点", "撕裂", "半态"].includes(f)) return "warn";
   return "";
 }
 function 渲染水位(el, o) {
@@ -86,8 +86,24 @@ function 填命运字典(el, dict) {
     `<div class="只读框 上距8"><b class="铜字">${安全文本(k)}</b> · ${安全文本(v)}</div>`
   ).join("");
 }
+function 渲染同票条(el, 态) {
+  if (!el) return;
+  if (!态) { el.innerHTML = ""; return; }
+  const 绿 = 态["可亮绿"] === true;
+  const 芯片 = 安全文本(态["芯片"] || (绿 ? "入栏已亮" : "边表外置"));
+  const 半态 = 态["半态笔数"] ?? 0;
+  const 拒刷 = 态["拒半态回刷"] ? "开" : "关";
+  const 指纹短 = 安全文本(String(态["指纹"] || "—").slice(0, 12));
+  el.innerHTML = `
+    <div class="门槛卡"><div class="k">主边同票</div><div class="v">${探栏.徽章(芯片, 绿 ? "好" : "危")}</div></div>
+    <div class="门槛卡"><div class="k">形态 / 读轨</div><div class="v" style="font-size:14px">${安全文本(态["形态"]||"切流账册")} · ${安全文本(态["读轨"]||"—")}</div></div>
+    <div class="门槛卡"><div class="k">账册指纹</div><div class="v" style="font-size:14px">${指纹短}</div></div>
+    <div class="门槛卡"><div class="k">半态笔数</div><div class="v" style="color:${半态 ? "var(--danger)" : "var(--ok)"}">${半态}</div></div>
+    <div class="门槛卡"><div class="k">拒半态回刷</div><div class="v" style="font-size:14px">${拒刷}</div></div>
+  `;
+}
 window.探栏 = {
   getJSON, postJSON, 行, 徽章, 空态, 安全文本, 命运色,
-  渲染水位, 渲染门槛, 渲染批次表,
+  渲染水位, 渲染门槛, 渲染批次表, 渲染同票条,
   装载摘要文, 结栏摘要文, 贯验摘要文, 填命运字典,
 };

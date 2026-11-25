@@ -1,37 +1,27 @@
-"""边表同票切流账册空壳：应锁指纹拒回刷；当前只记软笔记。"""
+"""边表同票切流账册：耐久指纹、拒半态回刷、读轨切到 cutover_book。"""
 from __future__ import annotations
 
-from app.db import 连接
 from app.services import edgeout as core
-
-_SLUG = "edgeout"
-_TITLE = "边表同票"
-_OK = "入栏已亮"
+from app.services import 同票
 
 
 def append_cutover(ref_id: int, note: str = "") -> dict:
-    conn = 连接()
-    try:
-        core._ensure(conn)
-        core._set(conn, f"{_SLUG}_cutover_note_{ref_id}", note or _TITLE)
-        core._set(conn, f"{_SLUG}_panel_chip", _OK)
-        # missing durable fp + reject_refresh + active_read rewrite
-        conn.commit()
-    finally:
-        conn.close()
+    落 = 同票.落定切流()
+    态 = 同票.同票状态()
     return {
         "ref_id": ref_id,
-        "note": note,
-        "panel": core.panel_chip(),
-        "truth": core.truth_flag(),
-        "active_read": core.active_read_ref(),
-        "cutover_fp": core.cutover_fp(),
-        "reject_refresh": core.reject_refresh(),
+        "note": note or 态["标题"],
+        "panel": 态["芯片"],
+        "truth": 态["芯片"],
+        "active_read": 落["active_read"],
+        "cutover_fp": 落["指纹"],
+        "reject_refresh": 落["reject_refresh"],
+        "半态笔数": 落["半态笔数"],
+        "可亮绿": 态["可亮绿"],
     }
 
 
 def board() -> dict:
     dash = core.dashboard()
     dash["fate"] = "cutover_book"
-    dash["panel_pack_mismatch"] = True
     return dash

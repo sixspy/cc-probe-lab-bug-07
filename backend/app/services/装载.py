@@ -1,6 +1,11 @@
-"""报文装载 → 入栏或坏点。"""
+"""报文装载 → 入栏或坏点。
+
+同票契约：主表（观测报文）与边表（入栏缓冲/坏点匣）同事务落定，同成同败。
+边表插入失败则整票回滚——主表不残留半态、不写装载批次、不亮成功。
+"""
 from __future__ import annotations
 import json
+import sqlite3
 import uuid
 from app.db import 连接
 from app.seed import 此刻
@@ -49,44 +54,60 @@ def 装一批(体: dict) -> dict:
             读数 = float(ev["读数"])
             处理 = 仓时
             漂 = 时间.漂移秒(ev["观测时"], 仓时)
-            # 边表外置：主表先提交
-            conn.commit()
-            conn.execute(
-                """INSERT INTO 观测报文(报文编号,站点键,指标键,读数,观测时,处理时,命运,批次编号)
-                   VALUES (?,?,?,?,?,?,?,?)""",
-                (编号, ev["站点键"], ev["指标键"], 读数, ev["观测时"], 处理, "已装载", 批次),
-            )
-            报告["入流"] += 1
-            ok, 原因 = 校验.过门槛(读数, 规, ev["指标键"])
-            if ok:
+            点 = f"sp_{编号.replace('-', '_')}_{uuid.uuid4().hex[:6]}"
+            try:
+                # 主边同票：主表与边表在同一事务内落定，期间不提交；
+                # 单报文用保存点隔离，撞键只回滚该票，不连累同批前序报文
+                conn.execute(f"SAVEPOINT {点}")
                 conn.execute(
-                    """INSERT INTO 入栏缓冲(报文编号,站点键,指标键,读数,观测时,栏号,命运,入栏时)
+                    """INSERT INTO 观测报文(报文编号,站点键,指标键,读数,观测时,处理时,命运,批次编号)
                        VALUES (?,?,?,?,?,?,?,?)""",
-                    (编号, ev["站点键"], ev["指标键"], 读数, ev["观测时"], 栏号, "在栏", 处理),
+                    (编号, ev["站点键"], ev["指标键"], 读数, ev["观测时"], 处理, "已装载", 批次),
                 )
-                conn.execute("UPDATE 观测报文 SET 命运=? WHERE 报文编号=?", ("已入栏", 编号))
-                报告["入栏"] += 1
-                报告["明细"].append({
-                    "命运": "入栏",
-                    "报文编号": 编号,
-                    "栏号": 栏号,
-                    "漂移秒": 漂,
-                    "受控": 校验.指标是否受控(ev["指标键"]),
-                })
-            else:
-                conn.execute(
-                    """INSERT INTO 坏点匣(报文编号,站点键,原因,读数,观测时,入匣时)
-                       VALUES (?,?,?,?,?,?)""",
-                    (编号, ev["站点键"], 原因, 读数, ev["观测时"], 处理),
-                )
-                conn.execute("UPDATE 观测报文 SET 命运=? WHERE 报文编号=?", ("已坏点", 编号))
-                报告["坏点"] += 1
-                报告["明细"].append({"命运": "坏点", "报文编号": 编号, "原因": 原因})
+                报告["入流"] += 1
+                ok, 原因 = 校验.过门槛(读数, 规, ev["指标键"])
+                if ok:
+                    conn.execute(
+                        """INSERT INTO 入栏缓冲(报文编号,站点键,指标键,读数,观测时,栏号,命运,入栏时)
+                           VALUES (?,?,?,?,?,?,?,?)""",
+                        (编号, ev["站点键"], ev["指标键"], 读数, ev["观测时"], 栏号, "在栏", 处理),
+                    )
+                    conn.execute("UPDATE 观测报文 SET 命运=? WHERE 报文编号=?", ("已入栏", 编号))
+                    报告["入栏"] += 1
+                    报告["明细"].append({
+                        "命运": "入栏",
+                        "报文编号": 编号,
+                        "栏号": 栏号,
+                        "漂移秒": 漂,
+                        "受控": 校验.指标是否受控(ev["指标键"]),
+                    })
+                else:
+                    conn.execute(
+                        """INSERT INTO 坏点匣(报文编号,站点键,原因,读数,观测时,入匣时)
+                           VALUES (?,?,?,?,?,?)""",
+                        (编号, ev["站点键"], 原因, 读数, ev["观测时"], 处理),
+                    )
+                    conn.execute("UPDATE 观测报文 SET 命运=? WHERE 报文编号=?", ("已坏点", 编号))
+                    报告["坏点"] += 1
+                    报告["明细"].append({"命运": "坏点", "报文编号": 编号, "原因": 原因})
+                conn.execute(f"RELEASE SAVEPOINT {点}")
+            except sqlite3.IntegrityError:
+                # 并发重试撞唯一键：败者按幂等驳回，只回滚该保存点，不污染同票
+                conn.execute(f"ROLLBACK TO SAVEPOINT {点}")
+                conn.execute(f"RELEASE SAVEPOINT {点}")
+                报告["驳回"] += 1
+                报告["明细"].append({"命运": "驳回-幂等", "说明": 编号})
+                continue
         conn.execute(
             """INSERT INTO 装载批次(编号,时刻,入流,入栏,坏点,报告) VALUES (?,?,?,?,?,?)""",
             (批次, 仓时, 报告["入流"], 报告["入栏"], 报告["坏点"], json.dumps(报告, ensure_ascii=False)),
         )
         conn.commit()
+    except Exception:
+        # 边表失败/断连：整票回滚，主表命运与边表行同败，杜绝假绿
+        conn.rollback()
+        raise
     finally:
         conn.close()
+    报告["同票"] = "主边同票"
     return 报告

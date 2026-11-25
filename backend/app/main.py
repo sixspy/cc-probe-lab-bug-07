@@ -6,6 +6,7 @@ from app.services import edgeout as edgeout_svc
 from app.services import edgeout_cutover as edgeout_cut_svc
 from app.services import edgeout_dualwrite as edgeout_dual_svc
 from app.services import edgeout_audit as edgeout_audit_svc
+from app.services import 同票 as 同票_svc
 
 _STATIC = Path(__file__).resolve().parent / "static"
 app = Quart(__name__)
@@ -222,3 +223,18 @@ async def api_edgeout_dual_post():
 @app.get("/api/edgeout/审计")
 async def api_edgeout_audit():
     return jsonify(edgeout_audit_svc.audit_summary())
+
+
+@app.get("/api/同票/状态")
+async def api_同票状态():
+    return jsonify(同票_svc.同票状态())
+
+
+@app.post("/api/同票/切流落定")
+async def api_同票切流():
+    return jsonify(同票_svc.落定切流())
+
+
+@app.post("/api/同票/回刷")
+async def api_同票回刷():
+    return jsonify(同票_svc.尝试回刷())

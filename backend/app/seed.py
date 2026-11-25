@@ -116,6 +116,9 @@ def 初始化库() -> None:
             )
     conn.commit()
     conn.close()
+    # 切流账册形态落定：主边同事务读轨 + 耐久指纹 + 拒半态回刷（幂等）
+    from app.services import 同票
+    同票.落定切流()
 
 
 
